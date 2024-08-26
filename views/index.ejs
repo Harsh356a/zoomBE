@@ -35,7 +35,7 @@
     <script>
       const roomId = "<%= roomId%>";
     </script>
-
+    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css"
@@ -80,6 +80,14 @@
 
     <script defer src="./app.js"></script>
     <!-- <script src="./socket.js"></script> -->
+    <script>
+      const ROOM_ID = "<%= roomId %>";
+      const myPeer = new Peer(undefined, {
+        host: '/',
+        port: '3001'
+      });
+    </script>
+    <script src="/app.js"></script>
   </div>
   </body>
 </html>
