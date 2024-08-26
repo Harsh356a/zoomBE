@@ -62,31 +62,3 @@ io.on("connection", (socket) => {
 });
 
 server.listen(process.env.PORT || 3030);
-io.on('connection', (socket) => {
-    socket.on('joinRoom', (roomId) => {
-      socket.join(roomId);
-      socket.to(roomId).emit("newJoining", socket.id);
-    });
-  
-    socket.on("sendOffer", ({ peerId, offer }, roomId) => {
-      socket.to(roomId).emit("receiveOffer", { peerId: socket.id, offer });
-    });
-  
-    socket.on("sendAnswer", ({ peerId, answer }, roomId) => {
-      socket.to(roomId).emit("receiveAnswer", { peerId: socket.id, answer });
-    });
-  
-    socket.on("sendIceCandidate", ({ peerId, candidate }, roomId) => {
-      socket.to(roomId).emit("receiveIceCandidate", { peerId: socket.id, candidate });
-    });
-  
-    socket.on('disconnecting', () => {
-      const rooms = Object.keys(socket.rooms);
-      rooms.forEach(room => {
-        socket.to(room).emit('peerDisconnected', socket.id);
-      });
-    });
-  });
-
-
-expressHTTPServer.listen(3000)
