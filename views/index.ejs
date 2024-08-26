@@ -44,7 +44,9 @@
     <script src="/socket.io/socket.io.js"></script>
   </head>
 
-  <body class="d-flex">
+  <body class="d-flex flex-column">
+    <h1 id="meetingHeading" class="text-center my-3"></h1>
+    <div class="d-flex flex-grow-1">
     <div id="video_grid"></div>
 
     <div id="options">
@@ -78,5 +80,6 @@
 
     <script defer src="./app.js"></script>
     <!-- <script src="./socket.js"></script> -->
+  </div>
   </body>
 </html>

@@ -1,293 +1,220 @@
+// Constants
 const videoGrid = document.getElementById("video_grid");
-const muteBtn = document.getElementById("muteBtn")
-const cameraoff = document.getElementById("cameraoff")
-const selectCam = document.getElementById("selectCam")
-const selectMic = document.getElementById("selectMic")
-const screenShare = document.getElementById("screenShare")
+const muteBtn = document.getElementById("muteBtn");
+const cameraoff = document.getElementById("cameraoff");
+const selectCam = document.getElementById("selectCam");
+const selectMic = document.getElementById("selectMic");
+const screenShare = document.getElementById("screenShare");
+const meetingHeading = document.getElementById("meetingHeading");
 
-// socket init 
+// Socket initialization
 const socket = io();
 
+// Global variables
 let mediaStream;
+let screenStream;
 let mute = false;
 let camera = true;
 let currentCam;
-let RTC;
+let peers = {};
 
-// sound mute handler
-muteBtn.addEventListener("click", (e) => {
-    if (mute) {
-        mute = false;
-        muteBtn.textContent = "Mute yourself";
-        mediaStream.getAudioTracks()
-            .forEach(track => {
-                track.enabled = true;
-            })
-    } else {
-        mute = true;
-        muteBtn.textContent = "Unmute yourself";
-        mediaStream.getAudioTracks()
-            .forEach(track => {
-                track.enabled = false;
-            })
-    }
+// Set meeting heading
+meetingHeading.textContent = `Meeting: ${roomId}`;
 
+// Mute button handler
+muteBtn.addEventListener("click", toggleMute);
 
-})
+// Camera toggle handler
+cameraoff.addEventListener('click', toggleCamera);
 
+// Screen share handler
+screenShare.addEventListener('click', toggleScreenShare);
 
+// Initialize media and WebRTC connection
+getMedia();
 
-cameraoff.addEventListener('click', () => {
-    if (camera) {
-        cameraoff.textContent = "Turn on camera";
-        camera = false;
-        mediaStream.getVideoTracks()
-            .forEach(track => {
-                track.enabled = false;
-            })
-
-    } else {
-        cameraoff.textContent = "Turn off camera";
-        camera = true;
-        mediaStream.getVideoTracks()
-            .forEach(track => {
-                track.enabled = true;
-            })
-    }
-})
-
-
-// getting the medias
-async function getMedia(cameraId, micId) {
-
-
-    currentCam = cameraId === null ? currentCam : cameraId;
-
-    const initialConstraits = {
-        video: true,
-        audio: true
-    }
-
-    const preferredCameraConstraints = {
-        video: {
-            deviceId: cameraId
-        },
-        audio: true,
-    }
-
-    const videoOption = currentCam ? {
-        deviceId: currentCam
-    } : true;
-
-    const preferredMicConstraints = {
-        video: videoOption,
-        audio: {
-            deviceId: micId
-        },
-    }
-
-    try {
-
-
-        mediaStream = await window.navigator.mediaDevices.getUserMedia(cameraId || micId ? cameraId ? preferredCameraConstraints : preferredMicConstraints : initialConstraits)
-        // send joining notification
-      
-        displayMedia()
-        getAllCameras()
-        getAllMics()
-        makeWebRTCConnection();
-
-        // room joining event
-        socket.emit('joinRoom', roomId)
-
-    } catch (error) {
-        console.log(error);
-    }
-
-
-}
-getMedia()
-
-
-
-
-async function getScreenMedia() {
-    try {
-        mediaStream = await navigator.mediaDevices.getDisplayMedia({
-            audio: true,
-            video: true,
-        });
-        displayMedia()
-    } catch (error) {
-        console.log(error);
-    }
-}
-
-
-screenShare.addEventListener('click', getScreenMedia)
-
-
-// display media
-function displayMedia() {
-    const video = document.createElement('video');
-    video.srcObject = mediaStream;
-    video.addEventListener('loadedmetadata', () => {
-        video.play()
-    })
-    videoGrid.appendChild(video)
-
-}
-
-// get all cameras
-async function getAllCameras() {
-    const currentCamera = mediaStream.getVideoTracks()[0];
-    const allDevices = await window.navigator.mediaDevices.enumerateDevices();
-    selectCam.innerHTML = ''
-    allDevices.forEach(device => {
-
-        if (device.kind === "videoinput") {
-            const option = document.createElement('option');
-            option.value = device.deviceId;
-            option.textContent = device.label;
-            option.selected = device.label === currentCamera.label ? true : false;
-            selectCam.appendChild(option)
-        }
-    })
-}
-
-
-
-
-// get all mics
-async function getAllMics() {
-    const currentMic = mediaStream.getAudioTracks()[0];
-    const allDevices = await window.navigator.mediaDevices.enumerateDevices();
-    selectMic.innerHTML = ''
-    allDevices.forEach(device => {
-
-        if (device.kind === "audioinput") {
-            const option = document.createElement('option');
-            option.value = device.deviceId;
-            option.textContent = device.label;
-            option.selected = device.label === currentMic.label ? true : false;
-            selectMic.appendChild(option)
-        }
-    })
-}
-
-
-
-// select a specific camera
+// Camera selection handler
 selectCam.addEventListener('input', (e) => {
     const cameraId = e.target.value;
-    getMedia(cameraId)
+    getMedia(cameraId);
+});
 
-})
-
-// select a specific camera
+// Microphone selection handler
 selectMic.addEventListener('input', (e) => {
     const micId = e.target.value;
-    getMedia(null, micId)
-})
+    getMedia(null, micId);
+});
 
+// Main functions
+async function getMedia(cameraId, micId) {
+    try {
+        const constraints = getMediaConstraints(cameraId, micId);
+        mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        displayMedia(mediaStream, true);
+        await updateDeviceLists();
+        
+        // Close existing peer connections and create new ones
+        Object.values(peers).forEach(peer => peer.close());
+        peers = {};
+        
+        joinRoom();
+    } catch (error) {
+        console.error("Error accessing media devices:", error);
+    }
+}
 
+function getMediaConstraints(cameraId, micId) {
+    const videoConstraints = cameraId ? { deviceId: { exact: cameraId } } : true;
+    const audioConstraints = micId ? { deviceId: { exact: micId } } : true;
+    
+    return {
+        video: videoConstraints,
+        audio: audioConstraints
+    };
+}
 
+function displayMedia(stream, isLocal = false) {
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    video.addEventListener('loadedmetadata', () => video.play());
+    video.muted = isLocal; // Mute local video to prevent echo
+    videoGrid.appendChild(video);
+    return video;
+}
 
+async function updateDeviceLists() {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    updateDeviceList(selectCam, "videoinput", mediaStream.getVideoTracks()[0]);
+    updateDeviceList(selectMic, "audioinput", mediaStream.getAudioTracks()[0]);
+}
 
+function updateDeviceList(selectElement, deviceKind, currentTrack) {
+    selectElement.innerHTML = '';
+    devices
+        .filter(device => device.kind === deviceKind)
+        .forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            option.textContent = device.label;
+            option.selected = device.label === currentTrack.label;
+            selectElement.appendChild(option);
+        });
+}
 
+function joinRoom() {
+    socket.emit('joinRoom', roomId);
+}
 
-/// socket
-
-socket.on("newJoining", () => {
-    makeAOffer()
-})
-
-
-// make WebRTC connection
-function makeWebRTCConnection() {
-    // rtc init
-    RTC = new RTCPeerConnection({
+function createPeerConnection(peerId) {
+    const peerConnection = new RTCPeerConnection({
         iceServers: [
-            {
-              urls: 'stun:stun1.l.google.com:19302'
-            },
-            {
-              urls: 'stun:stun3.l.google.com:19302'
-            },
-            {
-              urls: 'stun:stun4.l.google.com:19302'
-            }
-          ]
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+        ]
     });
 
-    // add media tracks to RTC
-    mediaStream.getTracks()
-   .forEach(track => {
-      RTC.addTrack(track,mediaStream )
-  })
+    mediaStream.getTracks().forEach(track => peerConnection.addTrack(track, mediaStream));
 
-    // send ICE candidate
-  RTC.addEventListener('icecandidate', (data) => {
-    socket.emit( "sendIceCandidate",data.candidate, roomId);
-  })
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit("sendIceCandidate", { peerId, candidate: event.candidate }, roomId);
+        }
+    };
 
-        // send ICE candidate
-  RTC.addEventListener('addstream', (data) => {
-      const videoTag = document.createElement('video');
-      videoTag.srcObject = data.stream;
-      videoTag.addEventListener('loadedmetadata', () => {
-          videoTag.play()
-      })
+    peerConnection.ontrack = (event) => {
+        const remoteVideo = displayMedia(event.streams[0]);
+        remoteVideo.setAttribute('data-peer-id', peerId);
+    };
 
-      videoGrid.appendChild(videoTag)
-  })
-    
+    return peerConnection;
 }
 
+// Socket event handlers
+socket.on("newJoining", (peerId) => {
+    const peerConnection = createPeerConnection(peerId);
+    peers[peerId] = peerConnection;
+    makeOffer(peerConnection, peerId);
+});
 
+socket.on("receiveOffer", async ({ peerId, offer }) => {
+    const peerConnection = createPeerConnection(peerId);
+    peers[peerId] = peerConnection;
+    await peerConnection.setRemoteDescription(offer);
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    socket.emit("sendAnswer", { peerId, answer }, roomId);
+});
 
-// make a offer
-async function makeAOffer() {
-    const offer = await RTC.createOffer();
-    RTC.setLocalDescription(offer)
-    // send the offer 
-    socket.emit("sendTheOffer", offer, roomId)
+socket.on("receiveAnswer", async ({ peerId, answer }) => {
+    await peers[peerId].setRemoteDescription(answer);
+});
+
+socket.on("receiveIceCandidate", ({ peerId, candidate }) => {
+    peers[peerId].addIceCandidate(new RTCIceCandidate(candidate));
+});
+
+socket.on("peerDisconnected", (peerId) => {
+    if (peers[peerId]) {
+        peers[peerId].close();
+        delete peers[peerId];
+    }
+    const remoteVideo = document.querySelector(`video[data-peer-id="${peerId}"]`);
+    if (remoteVideo) remoteVideo.remove();
+});
+
+// Helper functions
+async function makeOffer(peerConnection, peerId) {
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.emit("sendOffer", { peerId, offer }, roomId);
 }
 
-// receive offer
-socket.on("receiveOffer", async (offer) => {
-    RTC.setRemoteDescription(offer);
-    const answer = await RTC.createAnswer();
-    RTC.setLocalDescription(answer);
-    
-    // send the answer
-    socket.emit("sendTheAnswer", answer, roomId)
-})
+function toggleMute() {
+    mute = !mute;
+    mediaStream.getAudioTracks().forEach(track => track.enabled = !mute);
+    muteBtn.textContent = mute ? "Unmute yourself" : "Mute yourself";
+}
 
+function toggleCamera() {
+    camera = !camera;
+    mediaStream.getVideoTracks().forEach(track => track.enabled = camera);
+    cameraoff.textContent = camera ? "Turn off camera" : "Turn on camera";
+}
 
-// receive answer
-socket.on("receiveAnswer", (answer) => {
-    RTC.setRemoteDescription(answer)
-})
+async function toggleScreenShare() {
+    if (!screenStream) {
+        try {
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const videoTrack = screenStream.getVideoTracks()[0];
+            
+            Object.values(peers).forEach(peer => {
+                const sender = peer.getSenders().find(s => s.track.kind === 'video');
+                sender.replaceTrack(videoTrack);
+            });
+            
+            videoTrack.onended = stopScreenShare;
+            screenShare.textContent = "Stop sharing";
+        } catch (error) {
+            console.error("Error sharing screen:", error);
+        }
+    } else {
+        stopScreenShare();
+    }
+}
 
-
-// receive answer
-socket.on("receiveCandidate", (candidate) => {
-    RTC.addIceCandidate(candidate)
-})
-
-
-
-
-
-
-
-
-
-
-
-
-/* 
-    1. RTC connection initialization after media stream ready!
-    2. add media tracks to RTC
-*/
+function stopScreenShare() {
+    if (screenStream) {
+        screenStream.getTracks().forEach(track => track.stop());
+        screenStream = null;
+        
+        const videoTrack = mediaStream.getVideoTracks()[0];
+        Object.values(peers).forEach(peer => {
+            const sender = peer.getSenders().find(s => s.track.kind === 'video');
+            sender.replaceTrack(videoTrack);
+        });
+        
+        screenShare.textContent = "Share your Screen";
+    }
+}
