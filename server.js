@@ -1,64 +1,64 @@
-const express = require('express');
-const http = require('http');
-const {
-    v4: uuid
-} = require('uuid');
-const socketIO = require('socket.io')
+const express = require("express");
 const app = express();
-const expressHTTPServer = http.createServer(app);
-const io = new socketIO.Server(expressHTTPServer);
+const server = require("http").Server(app);
+const { v4: uuidv4 } = require("uuid");
+const io = require("socket.io")(server);
+const { ExpressPeerServer } = require("peer");
+const url = require("url");
+const peerServer = ExpressPeerServer(server, {
+    debug: true,
+});
+const path = require("path");
 
-app.use(express.static('public'))
-app.set('view engine', 'ejs')
+app.set("view engine", "ejs");
+app.use("/public", express.static(path.join(__dirname, "static")));
+app.use("/peerjs", peerServer);
 
-app.get('/', (req, res) => {
-    res.redirect(`/${uuid()}`)
-})
+app.get("/", (req, res) => {
+    res.sendFile(path.join(__dirname, "static", "index.html"));
+});
 
+app.get("/join", (req, res) => {
+    res.redirect(
+        url.format({
+            pathname: `/join/${uuidv4()}`,
+            query: req.query,
+        })
+    );
+});
 
-app.get("/:roomId", (req, res) => {
-    const roomId = req.params.roomId;
-    res.render('index', {
-        roomId
-    });
+app.get("/joinold", (req, res) => {
+    res.redirect(
+        url.format({
+            pathname: req.query.meeting_id,
+            query: req.query,
+        })
+    );
+});
 
-})
+app.get("/join/:rooms", (req, res) => {
+    res.render("room", { roomid: req.params.rooms, Myname: req.query.name });
+});
 
-
-
-
-io.on('connection', (socket) => {
-
-    // joining a new room
-    socket.on('joinRoom', (roomId) => {
+io.on("connection", (socket) => {
+    socket.on("join-room", (roomId, id, myname) => {
         socket.join(roomId);
+        socket.to(roomId).broadcast.emit("user-connected", id, myname);
 
-        // notify others about the new joining in the room
-        socket.to(roomId).emit("newJoining")
-    })
+        socket.on("messagesend", (message) => {
+            console.log(message);
+            io.to(roomId).emit("createMessage", message);
+        });
 
+        socket.on("tellName", (myname) => {
+            console.log(myname);
+            socket.to(roomId).broadcast.emit("AddName", myname);
+        });
 
-    // send the offer 
-    socket.on("sendTheOffer", (offer, roomId) => {
-        socket.to(roomId).emit("receiveOffer", offer)
-    })
+        socket.on("disconnect", () => {
+            socket.to(roomId).broadcast.emit("user-disconnected", id);
+        });
+    });
+});
 
-    // send the answer 
-    socket.on("sendTheAnswer", (answer, roomId) => {
-        socket.to(roomId).emit("receiveAnswer", answer)
-    })
-
-
-    // send Ice candidate 
-    socket.on("sendIceCandidate", (candidate, roomId) => {
-        socket.to(roomId).emit("receiveCandidate", candidate)
-    })
-
-
-
-
-    console.log("Socket connected!");
-})
-
-
-expressHTTPServer.listen(3000)
+server.listen(process.env.PORT || 3030);
