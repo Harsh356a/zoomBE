@@ -117,7 +117,7 @@ const cancel = () => {
 
 const copy = async() => {
     const roomid = document.getElementById("roomid").innerText;
-    await navigator.clipboard.writeText("https://zoombe.onrender.com/join" + roomid);
+    await navigator.clipboard.writeText("https://zoombe.onrender.com/join/" + roomid);
 };
 const invitebox = () => {
     $("#getCodeModal").modal("show");
