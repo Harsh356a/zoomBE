@@ -102,9 +102,13 @@ function setupWebRTC() {
             peers[from] = peer;
         }
         try {
+            console.log('Setting remote description (offer)');
             await peer.setRemoteDescription(new RTCSessionDescription(offer));
+            console.log('Creating answer');
             const answer = await peer.createAnswer();
+            console.log('Setting local description (answer)');
             await peer.setLocalDescription(answer);
+            console.log('Sending answer');
             socket.emit('sendAnswer', { to: from, answer });
         } catch (error) {
             console.error('Error handling offer:', error);
@@ -116,10 +120,17 @@ function setupWebRTC() {
         const peer = peers[from];
         if (peer) {
             try {
+                if (peer.signalingState === 'stable') {
+                    console.warn('Received answer in stable state, ignoring');
+                    return;
+                }
+                console.log('Setting remote description (answer)');
                 await peer.setRemoteDescription(new RTCSessionDescription(answer));
             } catch (error) {
                 console.error('Error setting remote description:', error);
             }
+        } else {
+            console.warn('Received answer for non-existent peer:', from);
         }
     });
 
@@ -128,10 +139,18 @@ function setupWebRTC() {
         const peer = peers[from];
         if (peer) {
             try {
-                await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                if (peer.remoteDescription) {
+                    console.log('Adding ICE candidate');
+                    await peer.addIceCandidate(new RTCIceCandidate(candidate));
+                } else {
+                    console.warn('Received ICE candidate before remote description, queuing');
+                    // You might want to implement a queue system here if this happens frequently
+                }
             } catch (error) {
                 console.error('Error adding ICE candidate:', error);
             }
+        } else {
+            console.warn('Received ICE candidate for non-existent peer:', from);
         }
     });
 }
@@ -147,6 +166,7 @@ function createPeerConnection(userId) {
 
     peer.onicecandidate = (event) => {
         if (event.candidate) {
+            console.log('Sending ICE candidate');
             socket.emit('sendIceCandidate', {
                 to: userId,
                 candidate: event.candidate
@@ -182,8 +202,11 @@ function createPeerConnection(userId) {
 
 async function makeOffer(userId, peer) {
     try {
+        console.log('Creating offer');
         const offer = await peer.createOffer();
+        console.log('Setting local description (offer)');
         await peer.setLocalDescription(offer);
+        console.log('Sending offer');
         socket.emit('sendOffer', { to: userId, offer });
     } catch (error) {
         console.error('Error creating offer:', error);
