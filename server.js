@@ -1,64 +1,66 @@
-const express = require("express");
+const express = require('express');
+const http = require('http');
+const { v4: uuid } = require('uuid');
+const socketIO = require('socket.io');
+
 const app = express();
-const server = require("http").Server(app);
-const { v4: uuidv4 } = require("uuid");
-const io = require("socket.io")(server);
-const { ExpressPeerServer } = require("peer");
-const url = require("url");
-const peerServer = ExpressPeerServer(server, {
-    debug: true,
-});
-const path = require("path");
+const server = http.createServer(app);
+const io = socketIO(server);
 
-app.set("view engine", "ejs");
-app.use("/public", express.static(path.join(__dirname, "static")));
-app.use("/peerjs", peerServer);
+const rooms = new Map();
 
-app.get("/", (req, res) => {
-    res.sendFile(path.join(__dirname, "static", "index.html"));
+app.use(express.static('public'));
+app.set('view engine', 'ejs');
+
+app.get('/', (req, res) => {
+    res.redirect(`/${uuid()}`);
 });
 
-app.get("/join", (req, res) => {
-    res.redirect(
-        url.format({
-            pathname: `/join/${uuidv4()}`,
-            query: req.query,
-        })
-    );
+app.get("/:roomId", (req, res) => {
+    const roomId = req.params.roomId;
+    res.render('index', { roomId });
 });
 
-app.get("/joinold", (req, res) => {
-    res.redirect(
-        url.format({
-            pathname: req.query.meeting_id,
-            query: req.query,
-        })
-    );
-});
-
-app.get("/join/:rooms", (req, res) => {
-    res.render("room", { roomid: req.params.rooms, Myname: req.query.name });
-});
-
-io.on("connection", (socket) => {
-    socket.on("join-room", (roomId, id, myname) => {
+io.on('connection', (socket) => {
+    socket.on('joinRoom', (roomId) => {
         socket.join(roomId);
-        socket.to(roomId).broadcast.emit("user-connected", id, myname);
-
-        socket.on("messagesend", (message) => {
-            console.log(message);
-            io.to(roomId).emit("createMessage", message);
+        
+        if (!rooms.has(roomId)) {
+            rooms.set(roomId, new Set());
+        }
+        
+        rooms.get(roomId).forEach(userId => {
+            socket.emit('userJoined', userId);
         });
-
-        socket.on("tellName", (myname) => {
-            console.log(myname);
-            socket.to(roomId).broadcast.emit("AddName", myname);
+        
+        rooms.get(roomId).add(socket.id);
+        socket.to(roomId).emit('userJoined', socket.id);
+        
+        socket.on('disconnect', () => {
+            if (rooms.has(roomId)) {
+                rooms.get(roomId).delete(socket.id);
+                socket.to(roomId).emit('userLeft', socket.id);
+                
+                if (rooms.get(roomId).size === 0) {
+                    rooms.delete(roomId);
+                }
+            }
         });
+    });
 
-        socket.on("disconnect", () => {
-            socket.to(roomId).broadcast.emit("user-disconnected", id);
-        });
+    socket.on("sendOffer", ({ to, offer }) => {
+        socket.to(to).emit("receiveOffer", { from: socket.id, offer });
+    });
+
+    socket.on("sendAnswer", ({ to, answer }) => {
+        socket.to(to).emit("receiveAnswer", { from: socket.id, answer });
+    });
+
+    socket.on("sendIceCandidate", ({ to, candidate }) => {
+        socket.to(to).emit("receiveIceCandidate", { from: socket.id, candidate });
     });
 });
 
-server.listen(process.env.PORT || 3030);
+server.listen(3000, () => {
+    console.log('Server is running on port 3000');
+});
