@@ -1,132 +1,88 @@
+let peerConnection;
+const socket = io();
 
-// webRTC
+socket.emit('joinRoom', roomId);
 
-
-
-socket.emit('joinRoom', roomId)
-
-socket.on("notify_new_joining", () => {
-    makeAnOffer()
-})
+socket.on('notify_new_joining', () => {
+    makeAnOffer();
+});
 
 async function makeAnOffer() {
-    console.log("send offer");
-    const offer = await peerConnection.createOffer();
-    peerConnection.setLocalDescription(offer);
-    socket.emit('makeOffer', offer, roomId)
-
+    console.log("Sending offer");
+    try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit('makeOffer', offer, roomId);
+    } catch (error) {
+        console.error("Error creating offer:", error);
+    }
 }
 
-
 socket.on("receiveOffer", async (offer) => {
-    peerConnection.setRemoteDescription(offer);
-    const answer = await peerConnection.createAnswer()
-    peerConnection.setLocalDescription(answer);
-    socket.emit('answar', answer, roomId)
+    console.log("Received offer");
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit('answer', answer, roomId);
+    } catch (error) {
+        console.error("Error handling offer:", error);
+    }
+});
 
-})
-
-socket.on("answer", (answer) => {
-    peerConnection.setRemoteDescription(answer);
-})
-
+socket.on("answer", async (answer) => {
+    console.log("Received answer");
+    try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    } catch (error) {
+        console.error("Error setting remote description:", error);
+    }
+});
 
 function addTrackToWebRTC() {
     mediaStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track);
-    })
+        peerConnection.addTrack(track, mediaStream);
+    });
 }
 
 function makeAWebRTCConnection() {
-    peerConnection = new RTCPeerConnection();
+    peerConnection = new RTCPeerConnection({
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+        ]
+    });
 
     peerConnection.addEventListener('icecandidate', handleCandidate);
-    peerConnection.addEventListener('addStream', (data) => {
-        console.log(data);
-    })
+    peerConnection.addEventListener('track', handleTrack);
 
-   
-
-    addTrackToWebRTC()
+    addTrackToWebRTC();
 }
 
-
-
-
-function handleCandidate(data) {
-    socket.emit('ice', data.candidate, roomId)
+function handleCandidate(event) {
+    if (event.candidate) {
+        socket.emit('ice', event.candidate, roomId);
+    }
 }
 
-
-socket.on("ice", (candidate) => {
-    peerConnection.addICECandidate(candidate)
-  
-})
-
-
-
-
-
-
-// get new user joining notification
-socket.on('notify_new_joining', () => {
-    makeAnOffer()
-
-})
-
-
-// add track to RTC
-async function addTrackToWebRTC() {
-    mediaStream.getTracks().forEach(track => {
-        RTC.addTrack(track, mediaStream);
-    })
-
-    // listing to icecandidate event
-    RTC.addEventListener('icecandidate', (data) => {
-        // send candidate 
-       
-        socket.emit("send_ice_candidate", data.candidate, roomId)
-    })
-}
-
-RTC.addEventListener('addstream', (data) => {
-    console.log(data);
+function handleTrack(event) {
+    console.log("Received remote track", event);
     const video = document.createElement('video');
-    video.srcObject = data.stream;
+    video.srcObject = event.streams[0];
     video.addEventListener('loadedmetadata', () => {
-        video.play()
-    })
-    videoGrid.appendChild(video)
-})
-
-
-// make an offer
-async function makeAnOffer() {
-    const offer = await RTC.createOffer();
-    RTC.setLocalDescription(offer);
-    // send an offer
-    socket.emit('send_offer', offer, roomId)
+        video.play().catch(e => console.error("Error playing video:", e));
+    });
+    videoGrid.appendChild(video);
 }
 
-// get offter 
-socket.on("get_offer", async (offer) => {
-    RTC.setRemoteDescription(offer);
-    const answar = await RTC.createAnswer();
-    RTC.setLocalDescription(answar);
+socket.on("ice", async (candidate) => {
+    try {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (error) {
+        console.error("Error adding ICE candidate:", error);
+    }
+});
 
-    // send the answer
-    socket.emit('send_answer', answar, roomId)
-
-})
-
-
-// get answer
-socket.on("get_answer", (answer) => {
-    RTC.setRemoteDescription(answer)
-})
-
-
-socket.on("get_candidate",  (candidate) => {
-    RTC.addIceCandidate(candidate)
-
-})
+// Initialize WebRTC connection
+makeAWebRTCConnection();
