@@ -44,22 +44,8 @@ async function getMedia(cameraId, micId) {
             });
         });
 
-        if (!videoGrid) {
-            console.error("Video grid element not found!");
-            return false;
-        }
-
         videoGrid.appendChild(localVideo);
         console.log("Local video appended to video grid");
-
-        // Create test video
-        const testVideo = document.createElement('video');
-        testVideo.muted = true;
-        testVideo.srcObject = mediaStream;
-        testVideo.style.width = "300px";
-        testVideo.style.height = "225px";
-        document.body.appendChild(testVideo);
-        testVideo.play().catch(error => console.error("Error playing test video:", error));
 
         // Setup UI controls
         setupUIControls();
@@ -67,25 +53,10 @@ async function getMedia(cameraId, micId) {
         // Setup WebRTC
         setupWebRTC();
 
-        // Check video tracks
-        checkVideoTracks();
-
         return true;
     } catch (error) {
         console.error("Error accessing media devices:", error);
         return false;
-    }
-}
-
-function checkVideoTracks() {
-    if (mediaStream) {
-        const videoTracks = mediaStream.getVideoTracks();
-        console.log("Video tracks:", videoTracks);
-        videoTracks.forEach((track, index) => {
-            console.log(`Video track ${index} enabled:`, track.enabled);
-        });
-    } else {
-        console.log("No media stream available");
     }
 }
 
@@ -116,34 +87,9 @@ function setupWebRTC() {
 
     socket.on('userJoined', (userId) => {
         console.log('New user joined:', userId);
-        if (!peers[userId]) {
-            const peer = createPeerConnection(userId);
-            peers[userId] = peer;
-            makeOffer(userId, peer);
-        }
-    });
-
-    socket.on('allUsers', (users) => {
-        console.log('Existing users in the room:', users);
-        users.forEach(userId => {
-            if (!peers[userId]) {
-                const peer = createPeerConnection(userId);
-                peers[userId] = peer;
-                makeOffer(userId, peer);
-            }
-        });
-    });
-
-    socket.on('userLeft', (userId) => {
-        console.log('User left:', userId);
-        if (peers[userId]) {
-            peers[userId].close();
-            delete peers[userId];
-        }
-        const videoElement = document.getElementById(`video-${userId}`);
-        if (videoElement) {
-            videoElement.remove();
-        }
+        const peer = createPeerConnection(userId);
+        peers[userId] = peer;
+        makeOffer(userId, peer);
     });
 
     socket.on('receiveOffer', async ({ from, offer }) => {
@@ -167,20 +113,59 @@ function setupWebRTC() {
         }
     });
 
-    socket.on('receiveIceCandidate', ({ from, candidate }) => {
+    socket.on('receiveIceCandidate', async ({ from, candidate }) => {
         console.log('Received ICE candidate from:', from);
         const peer = peers[from];
         if (peer) {
-            peer.addIceCandidate(new RTCIceCandidate(candidate));
+            await peer.addIceCandidate(new RTCIceCandidate(candidate));
         }
     });
 }
 
 function createPeerConnection(userId) {
-    // ... (your existing createPeerConnection function)
+    const peer = new RTCPeerConnection({
+        iceServers: [
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
+        ]
+    });
+
+    mediaStream.getTracks().forEach(track => {
+        peer.addTrack(track, mediaStream);
+    });
+
+    peer.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('sendIceCandidate', {
+                to: userId,
+                candidate: event.candidate
+            });
+        }
+    };
+
+    peer.ontrack = (event) => {
+        const video = document.createElement('video');
+        video.srcObject = event.streams[0];
+        video.id = `video-${userId}`;
+        video.addEventListener('loadedmetadata', () => {
+            video.play().catch(error => console.error("Error playing remote video:", error));
+        });
+        videoGrid.appendChild(video);
+    };
+
+    return peer;
 }
 
-// ... (rest of the WebRTC functions like makeOffer, etc.)
+async function makeOffer(userId, peer) {
+    try {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.emit('sendOffer', { to: userId, offer });
+    } catch (error) {
+        console.error('Error creating offer:', error);
+    }
+}
 
 // Start the application
 getMedia().then(success => {
