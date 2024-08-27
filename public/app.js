@@ -87,9 +87,11 @@ function setupWebRTC() {
 
     socket.on('userJoined', (userId) => {
         console.log('New user joined:', userId);
-        const peer = createPeerConnection(userId);
-        peers[userId] = peer;
-        makeOffer(userId, peer);
+        if (!peers[userId]) {
+            const peer = createPeerConnection(userId);
+            peers[userId] = peer;
+            makeOffer(userId, peer);
+        }
     });
 
     socket.on('receiveOffer', async ({ from, offer }) => {
@@ -99,17 +101,25 @@ function setupWebRTC() {
             peer = createPeerConnection(from);
             peers[from] = peer;
         }
-        await peer.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        socket.emit('sendAnswer', { to: from, answer });
+        try {
+            await peer.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await peer.createAnswer();
+            await peer.setLocalDescription(answer);
+            socket.emit('sendAnswer', { to: from, answer });
+        } catch (error) {
+            console.error('Error handling offer:', error);
+        }
     });
 
     socket.on('receiveAnswer', async ({ from, answer }) => {
         console.log('Received answer from:', from);
         const peer = peers[from];
         if (peer) {
-            await peer.setRemoteDescription(new RTCSessionDescription(answer));
+            try {
+                await peer.setRemoteDescription(new RTCSessionDescription(answer));
+            } catch (error) {
+                console.error('Error setting remote description:', error);
+            }
         }
     });
 
@@ -117,7 +127,11 @@ function setupWebRTC() {
         console.log('Received ICE candidate from:', from);
         const peer = peers[from];
         if (peer) {
-            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+            try {
+                await peer.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (error) {
+                console.error('Error adding ICE candidate:', error);
+            }
         }
     });
 }
@@ -131,10 +145,6 @@ function createPeerConnection(userId) {
         ]
     });
 
-    mediaStream.getTracks().forEach(track => {
-        peer.addTrack(track, mediaStream);
-    });
-
     peer.onicecandidate = (event) => {
         if (event.candidate) {
             socket.emit('sendIceCandidate', {
@@ -145,6 +155,7 @@ function createPeerConnection(userId) {
     };
 
     peer.ontrack = (event) => {
+        console.log('Received remote track', event);
         const video = document.createElement('video');
         video.srcObject = event.streams[0];
         video.id = `video-${userId}`;
@@ -153,6 +164,18 @@ function createPeerConnection(userId) {
         });
         videoGrid.appendChild(video);
     };
+
+    peer.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state change: ${peer.iceConnectionState}`);
+    };
+
+    peer.onsignalingstatechange = () => {
+        console.log(`Signaling state change: ${peer.signalingState}`);
+    };
+
+    mediaStream.getTracks().forEach(track => {
+        peer.addTrack(track, mediaStream);
+    });
 
     return peer;
 }
